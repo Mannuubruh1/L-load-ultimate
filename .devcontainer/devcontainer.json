@@ -1,0 +1,13 @@
+{
+  "name": "smash-l-load",
+  "image": "mcr.microsoft.com/devcontainers/rust:1",
+  "postCreateCommand": "rustup toolchain install nightly && rustup component add rust-src --toolchain nightly",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml"
+      ]
+    }
+  }
+}
