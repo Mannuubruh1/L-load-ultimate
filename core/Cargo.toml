@@ -1,0 +1,9 @@
+[package]
+name = "l_load_core"
+version = "0.1.0"
+edition = "2021"
+description = "Platform-independent config logic for the L-Load Smash Ultimate mod"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
