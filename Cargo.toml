@@ -1,0 +1,5 @@
+[workspace]
+resolver = "2"
+members = ["core"]
+# The Switch plugin crate (hooks, CSS, badge) gets added here once the
+# Skyline/Ozone setup is confirmed. See README.md "Open questions".
