@@ -1,0 +1,4 @@
+target/
+*.nro
+*.nso
+.DS_Store
