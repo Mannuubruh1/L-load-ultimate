@@ -2,48 +2,56 @@
 
 A Smash Ultimate mod idea: press **L** on the character select screen to swap a
 character for a linked one, with the links defined in a config file
-(`sd:/ultimate/l_load.json`). See [docs/DESIGN.md](docs/DESIGN.md) for the full design.
+(`sd:/ultimate/l_load.json`). See [docs/DESIGN.md](docs/DESIGN.md) for the design
+and [docs/RESEARCH.md](docs/RESEARCH.md) for what the reference projects showed.
 
 ## Status
-
-Early scaffold. Only the platform-independent config logic exists so far.
 
 | Piece | State |
 |---|---|
 | `core/` config merge, parse, link lookup | Written, unit tested |
-| Plugin crate (hooks, CSS swap, badge) | Not started |
+| `plugin/` skeleton (loads, logs one line) | Written, **not yet built** (see below) |
+| Roster, config file I/O, CSS hooks, swap, badge | Not started |
+
+The plugin skeleton's manifest resolves (`skyline 0.6.0`) and the
+`#[skyline::main(name = "...")]` form it uses exists in the crate source, but it
+has never been compiled for the Switch target. The environment it was written in
+could not download the Rust toolchain that `cargo-skyline` needs.
 
 ## Working in Codespaces
 
-Open the repo in a Codespace. The dev container installs Rust plus a nightly
-toolchain with `rust-src`. Then:
+The dev container installs `cargo-skyline`. Then:
 
 ```bash
-cargo test        # runs the core logic tests
+# Core logic (host build, no game needed)
+cargo test
+
+# Plugin (Switch build)
+cd plugin
+cargo skyline update-std        # one time: installs the Switch toolchain; slow
+cargo skyline build --release
 ```
 
-## Open questions (resolve before writing the plugin crate)
+If `cargo skyline build` asks whether to install the toolchain, answer `Y`.
+The output should be an `.nro` under `plugin/target/aarch64-skyline-switch/release/`
+(likely `libl_load.nro`). If the build fails, paste the first error into the
+chat, because this step has not been tested yet.
 
-These came out of reading the Ozone and Smashline repos and the design doc,
-and have **not** been verified:
+Running the plugin needs a Switch or emulator with the game, Ozone and ARCropolis.
+Codespaces can build it but cannot run it.
 
-- **Toolchain.** Ozone's README says it is a drop-in Skyline replacement and that
-  Skyline plugins work with it, and it builds itself with devkitPro and
-  `cargo skyline`. Confirm the exact setup for building a *plugin*, and whether
-  `cargo-skyline` installs cleanly in Codespaces.
-- **Smashline.** Its wiki is the likely source for plugin and API docs. The design
-  doc's claim that Ozone is required by Smashline 2.0+ is unconfirmed.
-- **Crate names.** The doc mentions `prcx`; the usual `.prc` crate may be `prc-rs`.
-  Check against existing plugins.
-- **Hook points.** Finding the CSS input and character-select functions is the
-  hardest part. Study existing CSS-related plugins' source for offsets and patterns.
-- **Testing.** Codespaces can compile and unit test, but running the plugin needs
-  a Switch or emulator with the game, which cannot be done in Codespaces.
+## Layout
+
+- `core/`: platform-independent logic. Builds with plain `cargo`.
+- `plugin/`: the Skyline plugin. Builds with `cargo skyline`. It is excluded from
+  the root workspace on purpose, since it targets the Switch.
+- `docs/`: design and research notes.
 
 ## Suggested order
 
 1. Config logic and tests (done, in `core/`).
-2. Plugin crate that logs the roster and writes `l_load.json` on boot.
-3. A hardcoded L-press swap (for example Mario to Link) before any config wiring.
-4. Config-driven swap.
-5. Hover badge last, since it is the most fragile.
+2. Plugin skeleton that builds and logs on boot (written, needs a first build).
+3. Plugin writes `l_load.json` on boot.
+4. A hardcoded L-press swap (for example Mario to Link) before any config wiring.
+5. Config-driven swap.
+6. Hover badge last, since it is the most fragile.
