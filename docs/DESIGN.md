@@ -1,65 +1,167 @@
-1. Mod Concept & Core Features
+# L-Load: Design
 
+Revised 2026-11-23. Supersedes the first draft. Changes are based on
+[RESEARCH.md](RESEARCH.md); anything marked **(unverified)** has not been tested
+against the game and may change.
 
-A. Auto-Generated & Self-Updating Config (sd:/ultimate/l_load.json)
+## 1. Concept
 
-• First-Boot Generation: When Smash Ultimate finishes loading its character database (ui_chara_db.prc), the plugin scans every vanilla and modded fighter (including CSK Collection characters) and writes a clean JSON template where every character defaults to "" (unassigned).
-• Non-Destructive Updates: On future boots, if you install or remove character mods, the plugin reads your existing l_load.json, preserves all of your custom links, and appends any newly detected characters with "".
-• Flexible Linking Modes:
-	• One-Way Link: "ui_chara_goku": "ui_chara_vegeta" (pressing L on Goku switches to Vegeta).
-	• Two-Way Toggle: Pairing both entries switches back and forth between Goku and Vegeta.
-	• Multi-Character Cycle: Chaining A -> B -> C -> A lets you cycle through three or more variants from a single CSS slot.
-	• Optional Costume-Slot Support: Supporting "ui_chara_id" as well as "ui_chara_id:c120" lets you link both standalone CSK fighters and movesets hidden on extra costume slots (c08–c255).
+On the character select screen (CSS), pressing **L** swaps the character a
+player is holding or hovering for a linked character, defined in a config file.
+Think of it as the L-load shortcut from Smash Remix, but user-configurable.
 
-B. Dynamic CSS Hover & Selection Badge
+### 1.1 Config file: `sd:/ultimate/l_load.json`
 
-• Context-Aware Prompt: When a player's cursor hovers over (or selects) a character with an active link in l_load.json, a small overlay badge appears on that player's bottom CSS panel (chara_4 / chara_3 window).
-• Visuals: The badge displays Smash's built-in L button glyph next to the target character's stock icon (chara_2), giving instant visual feedback on who L will load.
-• Auto-Hide & Dynamic Flip: Moving the cursor onto an unlinked character hides the badge immediately; pressing L to swap characters flips the badge to show the previous character's stock icon (if two-way linked).
+A flat JSON object. Each key is a character ID, each value is the character that
+L switches to, or `""` for no link.
 
-C. Instant L-Press Character Swap on the CSS
+```json
+{
+  "ui_chara_goku": "ui_chara_vegeta",
+  "ui_chara_vegeta": "ui_chara_goku",
+  "ui_chara_mario": "",
+  "ui_chara_link": ""
+}
+```
 
-• No Holding Through Loading Screens: Pressing L while hovering over or holding a linked character swaps the player's active fighter (ui_chara_id and color_id) directly on the CSS.
-• Full UI & Audio Refresh: Swapping updates the player panel's portrait (chara_4), name plate, stock icon, and plays the new character's announcer voice clip.
-• Smart L Input Handling: Because L normally cycles costume colors backward once a token is placed, the plugin intercepts L on linked characters to trigger the character swap (while leaving R for costume cycling, or only overriding L while hovering/before token placement).
+**Rules**
 
-2. Everything You Need to Build It
+- **One target per character.** That single rule covers every linking style:
+  - *One-way:* A points to B, B is `""`.
+  - *Two-way toggle:* A points to B and B points to A.
+  - *Cycle:* A to B, B to C, C to A.
+- **Unassigned (`""`) and invalid targets are ignored**, so a typo can never
+  swap to nothing. Costume-slot targets like `ui_chara_x:c120` are validated on
+  the base ID. (Implemented in `core/`.)
+- **Non-destructive merging.** On boot, newly detected characters are appended
+  as `""`, existing links are never changed, and characters whose mods were
+  removed keep their entries so reinstalling doesn't lose your links.
+  (Implemented in `core/`.)
+- **Costume-slot syntax** (`ui_chara_id:c120`) is optional and comes last, since
+  mapping a costume number to the game's color index is not yet worked out
+  **(unverified)**.
 
+### 1.2 Behavior
 
-Development Environment & Toolchain
+- Pressing L while hovering a linked character, or holding one, swaps that
+  player's selection to the target and refreshes the panel (portrait, name,
+  stock icon, announcer).
+- L normally cycles costumes backward. L-Load only takes L for characters that
+  have a valid link; unlinked characters keep normal behavior. R is untouched.
+- **Offline only.** The swap is disabled online to avoid desyncs and surprises.
+- Optional later: a small on-screen badge showing the L glyph and the target
+  character's stock icon.
 
-• Rust Toolchain (rustup): Installed with the Nintendo Switch target (aarch64-nintendo-switch-freestanding).
-• cargo-skyline: Command-line tool used to build, package, and deploy .nro plugins for Skyline/Ozone.
-• Target Runtime — Ozone + ARCropolis:
-	• Ozone (exefs runtime replacement required by Smashline 2.0+).
-	• ARCropolis (handles modded file loading and ui_chara_db.prc merging).
-	• CSK Collection (optional, if your custom characters use added ui_chara_db slots).
-• Testing Setup: A modded Nintendo Switch running Atmosphère (with FTP/USB transfer for quick .nro iteration) or a Switch emulator configured with Ozone, ARCropolis, and Smash Ultimate 13.0.5.
+## 2. Platform and toolchain
 
-Key Rust Crates & Libraries
+| Piece | Choice | Status |
+|---|---|---|
+| Language | Rust, `cdylib` crate | Verified (same as Smashline and ARCropolis) |
+| Plugin framework | `skyline-rs` (`skyline` crate) | Verified; pick crates.io `0.6` or the `ultimate-research/skyline-rs` git version |
+| Build | `cargo skyline build --release` | Verified (Smashline's `build.sh`) |
+| Runtime loader | Ozone | Verified (README: drop-in Skyline replacement) |
+| File and `ui_chara_db` merging | ARCropolis (must load before L-Load's boot step) | Verified role |
+| Cargo profiles | `panic = "abort"`, release `lto = true` | Verified (both reference projects) |
+| Smashline | **Not used.** It replaces fighter/weapon scripts, nothing UI-related | Inference from its wiki |
 
-• skyline (skyline-rs): Provides memory hooking (#[skyline::hook]), symbol lookup, and Switch OS filesystem access (std::fs mapped to sd:/).
-• nnsdk: Rust bindings for Nintendo's internal SDK types—specifically nn::ui2d (for manipulating CSS layout panes, textures, and visibility) and nn::hid (for controller button checks).
-• smash (smash-rs): Bindings for Super Smash Bros. Ultimate's internal classes, IDs, and UI/database structs.
-• serde & serde_json: Serializes and deserializes sd:/ultimate/l_load.json cleanly, preserving order (pair with indexmap if you want the JSON to stay sorted by CSS roster order).
-• prcx / param-xml (or ui_chara_db memory structs): Reads the loaded ui_chara_db entries in memory after ARCropolis finishes mounting mods.
+Development happens in GitHub Codespaces. Codespaces can compile and run the
+unit tests for `core/`; it **cannot run the plugin**. Real testing needs a
+Switch or an emulator with the game, Ozone, and ARCropolis.
 
-3. Technical Architecture (How the .nro Fits Together)
+## 3. Architecture
 
+Two crates in one workspace.
 
-Module	Responsibility	How It Hooks Into Smash Ultimate
-config.rs	Loads, merges, and saves sd:/ultimate/l_load.json	Hooks right after ui_chara_db finishes initializing on boot; reads all active ui_chara_id entries, merges with existing JSON on sd:/, and stores the lookup map in memory (RwLock<IndexMap<String, String>>).
-css_input.rs	Detects L button presses per player (P1–P8)	Hooks the CSS frame/input update loop; checks L just_pressed for each active player port, looks up their hovered/selected character in the config map, and suppresses default L costume-cycling when a swap triggers.
-css_swap.rs	Changes the active character on the CSS	Calls Smash's internal CSS character-selection setter with the target ui_chara_id and color_id, triggering the built-in portrait (chara_4), name text, and announcer voice refresh.
-css_badge.rs	Renders the L glyph + target stock icon (chara_2)	Hooks the CSS player-panel (nn::ui2d::Layout) update; locates or clones an icon pane on each player's panel, binds the target character's chara_2 BNTX texture, and toggles visibility based on whether the hovered fighter has a valid link.
+**`core/`** (exists, tested). Platform-independent logic with no game
+dependencies, so it builds and tests anywhere.
 
+- `parse_config`, `merge_roster`, `link_target`.
 
-4. Recommended Development Roadmap
+**`plugin/`** (not started). The Skyline plugin. Modules:
 
-1. Phase 1 — Boot & Config Generator: Set up a cargo-skyline project, hook ui_chara_db initialization, and verify that booting the game generates sd:/ultimate/l_load.json with all vanilla and modded fighters.
-2. Phase 2 — L-Press Character Swap: Hook the CSS input loop so pressing L on a linked character swaps the player's selected fighter and refreshes the portrait and announcer call.
-3. Phase 3 — Hover Badge UI (nn::ui2d): Hook the CSS panel layout to display the L button icon and load the target character's chara_2 stock texture when hovering over a linked slot.
-4. Phase 4 — Polish & Edge Cases: Add support for costume-slot syntax (ui_chara_mario:c120), multi-player ports (P1–P8), CPU tokens, and invalid/missing target ID safeguards in l_load.json.
-If you're ready to start coding, let me know:
-• Whether you want me to generate the starter Cargo.toml and lib.rs template for Phase 1 (auto-generating l_load.json on boot)
-• If you'll be testing on real Switch hardware or an emulator so I can include the right build/deploy commands
+| Module | Job |
+|---|---|
+| `roster.rs` | Read the character list from the game's database after ARCropolis has merged mods. |
+| `hash.rs` | Convert `ui_chara_*` names to hash40 and back. See 4.1. |
+| `config_io.rs` | Read and write `l_load.json` on the SD card, using `core/`. |
+| `css_input.rs` | Catch L on the CSS, check the hovered or selected character against the config, suppress normal costume cycling when a swap happens. |
+| `css_swap.rs` | Change the player's selected character and refresh the panel. |
+| `css_badge.rs` | Optional on-screen hint. Last, most fragile. |
+
+### 3.1 Hook points (all unverified for our use)
+
+These are what ARCropolis (GPLv3) already hooks on the CSS. They're leads, not
+confirmed solutions.
+
+- **`css_set_selected_character_ui(param_1, chara_hash_1, chara_hash_2, color,
+  unk1, unk2)`**: sets what the CSS panel shows for a character. A candidate
+  for refreshing the panel. Its exact role in committing a choice is unclear.
+- **`change_color_l` / `change_color_r`** (inline hooks): the costume-cycling
+  handlers. `change_color_l` is the natural place to catch L. Unknown whether
+  it fires while merely hovering, before a token is placed.
+- **`chara_select_scene_destructor`**: tells you when the CSS closes. Useful for
+  clearing state.
+- **`is_online`**: ARCropolis already has a way to check this; use it to
+  disable swapping online.
+- Finding functions by **byte-pattern scan** (as ARCropolis does) is more
+  robust across game updates than hardcoded offsets.
+
+## 4. Known problems
+
+### 4.1 Characters are hashes, not names
+
+The game identifies characters by `u64` hash40 values. Going from a name in the
+config to a hash is easy. Going from the game's database to readable names, to
+*generate* the config, is not: the database holds hashes. Options:
+
+1. Bundle a hash-to-name label list for vanilla characters and let modded
+   characters show as their hex hash until the user names them.
+2. Read labels from an existing label file if one ships with the loader.
+3. Generate the config with hex keys only and let users rename.
+
+Needs a decision before Phase 1 is finished.
+
+### 4.2 The swap function is unidentified
+
+Nobody here has confirmed which function actually commits a character change.
+Expect to spend real time disassembling or experimenting. This is the riskiest
+part of the project, which is why the roadmap proves it with a hardcoded swap
+before anything else is built on top.
+
+### 4.3 License
+
+ARCropolis is GPLv3. Copying its code or patterns can put GPL terms on this
+mod. Decide on a license for L-Load *before* copying anything, and prefer
+writing your own hooks after reading theirs.
+
+## 5. Roadmap
+
+Each phase has a check for "done". Don't start the next phase until it passes.
+
+1. **Core logic.** Done: config parse, merge, link lookup, with tests in `core/`.
+2. **Plugin skeleton.** `plugin/` crate builds with `cargo skyline`, loads under
+   Ozone, and logs one line on boot. *Done when:* the log line appears on a
+   test setup.
+3. **Roster + config generation.** Read the character list after mods merge, run
+   it through `merge_roster`, write `l_load.json`. Requires the 4.1 decision.
+   *Done when:* a fresh boot creates the file, and a second boot after installing
+   a character appends it without touching existing links.
+4. **Hardcoded swap proof.** Pressing L on a hardcoded character (for example
+   Mario) switches to another (for example Link). No config involved.
+   *Done when:* it works for one player and the panel refreshes correctly.
+5. **Config-driven swap.** Replace the hardcoded pair with `link_target`, and
+   support all four player slots first. *Done when:* one-way, two-way, and cycle
+   links all behave, and unlinked characters keep normal L behavior.
+6. **Safeguards.** Offline-only gating, invalid or missing target handling,
+   CPU tokens, more than four ports if the game exposes them.
+7. **Costume-slot syntax** (`ui_chara_id:c120`). Only after the swap is stable.
+8. **Badge (optional).** The L glyph and target stock icon. Requires UI layout
+   manipulation and is the most likely to break across versions.
+
+## 6. Open questions
+
+- Switch or emulator for testing, and which game, Ozone, and ARCropolis versions.
+- Hash-to-name source for generated configs (4.1).
+- Whether `change_color_l` is the right L hook (3.1).
+- Which function commits a swap (4.2).
+- License for the project (4.3).
